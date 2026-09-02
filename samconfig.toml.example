@@ -1,0 +1,17 @@
+# Copy to samconfig.toml (gitignored) and fill in. Never commit the real file.
+#
+#   cp samconfig.toml.example samconfig.toml
+#   cd backend && sam build && sam deploy
+
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "ward11-canvass-api"
+region = "ca-central-1"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+parameter_overrides = """
+DatabaseUrl='postgresql://postgres.PROJECT:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres'
+SupabaseUrl='https://PROJECT.supabase.co'
+AllowedOrigins='https://your-app.vercel.app,http://localhost:5173'
+"""

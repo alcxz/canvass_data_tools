@@ -1,0 +1,6 @@
+# Ingest scripts and tests. No pandas: the importers use the stdlib csv module,
+# which also keeps the Lambda bundle a plain zip rather than a container image.
+shapely==2.0.6
+psycopg[binary]==3.2.3
+pytest==8.3.4
+ruff==0.8.4

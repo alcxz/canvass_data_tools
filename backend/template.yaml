@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Ward 11 canvass API (FastAPI on Lambda behind an HTTP API)
+
+# Secrets are declared here with NO default values and injected at deploy time
+# via --parameter-overrides, sourced from a gitignored samconfig.toml. This
+# repository is public: nothing secret may appear in this file.
+#
+# Lambda encrypts environment variables at rest with an AWS-managed key, which
+# AWS does not charge for, and decrypts them inside the Lambda service at
+# initialization rather than as billable kms:Decrypt calls. Total secrets cost
+# is therefore zero -- unlike SSM Parameter Store, whose GetParameter with
+# WithDecryption issues billable KMS requests, or Secrets Manager, which has no
+# permanent free tier.
+
+Parameters:
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Supabase Supavisor POOLED connection string (port 6543, not the direct
+      5432 one). Lambda concurrency will exhaust direct connections.
+  SupabaseUrl:
+    Type: String
+    Description: Supabase project URL, used to fetch the JWKS for token verification.
+  AllowedOrigins:
+    Type: String
+    Description: Comma-separated list of allowed browser origins (the Vercel URL).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 512
+    Timeout: 15
+    Architectures: [arm64]
+
+Resources:
+  CanvassApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: !Split [',', !Ref AllowedOrigins]
+        AllowHeaders: [Authorization, Content-Type]
+        AllowMethods: [GET, OPTIONS]
+
+  CanvassFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: main.handler
+      Description: Ward 11 canvass API
+      Environment:
+        Variables:
+          DATABASE_URL: !Ref DatabaseUrl
+          SUPABASE_URL: !Ref SupabaseUrl
+          ALLOWED_ORIGINS: !Ref AllowedOrigins
+      Events:
+        ApiEvents:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CanvassApi
+            Path: /{proxy+}
+            Method: ANY
+        RootEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CanvassApi
+            Path: /
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the API. Set this as VITE_API_URL in Vercel.
+    Value: !Sub 'https://${CanvassApi}.execute-api.${AWS::Region}.amazonaws.com'

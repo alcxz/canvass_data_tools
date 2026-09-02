@@ -1,0 +1,28 @@
+# Data — never committed. Contains voter PII.
+data/
+tests/fixtures/*
+!tests/fixtures/README.md
+
+# Data files currently at repo root. They belong in data/ — these patterns are a
+# safety net in case they are still here at first commit. Do not remove.
+/Census-Data-by-DA*.csv
+/Voter's List*.csv
+/Subset of Canvasses*.csv
+/lda_000b21a_e.json
+
+# Deploy-time secrets
+samconfig.toml
+.env*
+
+# Large source archives (the 197MB boundary zip exceeds GitHub's 100MB limit)
+*.zip
+
+# Build artifacts
+.aws-sam/
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
