@@ -235,3 +235,6 @@ the browser rather than anything obviously wrong with either deploy.
 - **Census caveats.** Commute mode, commute time and departure-time counts come
   from the 25% long-form sample and do not sum against population; DA counts are
   randomly rounded to 5.
+
+Example:
+<img width="1920" height="959" alt="Screenshot 2026-09-03 at 3 50 31 AM" src="https://github.com/user-attachments/assets/bd480abb-c75b-4e3f-b40e-817c8dc50f60" />
