@@ -27,10 +27,16 @@ from db import execute
 
 app = FastAPI(title="Ward 11 Canvass API", docs_url=None, redoc_url=None)
 
-# Locked to the Vercel origin. ALLOWED_ORIGINS is comma-separated.
+# Locked to the Vercel origin. ALLOWED_ORIGINS is comma-separated. A browser's
+# Origin header never carries a trailing slash, and the match is exact, so one
+# pasted from a URL bar is stripped here rather than silently failing CORS.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()],
+    allow_origins=[
+        o.strip().rstrip("/")
+        for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
+        if o.strip()
+    ],
     allow_credentials=True,
     allow_methods=["GET"],
     allow_headers=["Authorization", "Content-Type"],

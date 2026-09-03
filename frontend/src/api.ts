@@ -6,7 +6,9 @@ export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY,
 )
 
-const API_URL: string = import.meta.env.VITE_API_URL
+// The Function URL AWS prints ends in a slash and every path below starts with
+// one. Trim so the two never join into "//api/...", which FastAPI would 404.
+const API_URL: string = (import.meta.env.VITE_API_URL as string).replace(/\/+$/, '')
 
 /** Every call carries the Supabase session JWT. The browser never talks to the
  *  database directly -- voter PII sits behind the API's auth check, not behind

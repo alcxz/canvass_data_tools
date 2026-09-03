@@ -56,6 +56,27 @@ print_url() {
         --query FunctionUrl --output text
 }
 
+# So no 403 errors.
+ensure_url_permissions() {
+    local out
+    for stmt in \
+        "FunctionURLAllowPublicAccess lambda:InvokeFunctionUrl --function-url-auth-type NONE" \
+        "FunctionURLInvokeAllowPublicAccess lambda:InvokeFunction --invoked-via-function-url"
+    do
+        # shellcheck disable=SC2086  # word-splitting the flags is the point
+        set -- $stmt
+        if out=$(aws lambda add-permission \
+                --function-name "$FUNCTION_NAME" \
+                --statement-id "$1" --action "$2" --principal '*' "${@:3}" \
+                --region "$REGION" --no-cli-pager 2>&1); then
+            echo "  added permission $1"
+        elif [[ "$out" != *ResourceConflictException* ]]; then
+            echo "$out" >&2
+            return 1
+        fi
+    done
+}
+
 if [[ "$url_only" == true ]]; then
     print_url
     exit 0
@@ -138,6 +159,8 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$REGION" >
         --no-cli-pager --query 'LastModified' --output text
     aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$REGION"
 
+    ensure_url_permissions
+
     if [[ "$push_env" == true ]]; then
         echo "updating environment variables ..."
         aws lambda update-function-configuration \
@@ -193,17 +216,7 @@ else
         --auth-type NONE \
         --region "$REGION" --no-cli-pager >/dev/null
 
-    # Without this the Function URL returns 403 for everyone. AuthType NONE means
-    # AWS performs no authorization of its own -- authorization is the Supabase
-    # JWT verified in auth.py, and every route except /health rejects a request
-    # without a valid token.
-    aws lambda add-permission \
-        --function-name "$FUNCTION_NAME" \
-        --statement-id FunctionURLAllowPublicAccess \
-        --action lambda:InvokeFunctionUrl \
-        --principal '*' \
-        --function-url-auth-type NONE \
-        --region "$REGION" --no-cli-pager >/dev/null
+    ensure_url_permissions
 
     # Lambda would otherwise create this log group with retention set to "never
     # expire", and stored logs then accrue indefinitely.
