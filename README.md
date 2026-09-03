@@ -237,4 +237,4 @@ the browser rather than anything obviously wrong with either deploy.
   randomly rounded to 5.
 
 Example:
-<img width="1920" height="959" alt="Screenshot 2026-09-03 at 3 50 31 AM" src="https://github.com/user-attachments/assets/bd480abb-c75b-4e3f-b40e-817c8dc50f60" />
+<img width="1920" height="958" alt="Screenshot 2026-09-03 at 3 53 46 AM" src="https://github.com/user-attachments/assets/1dca9460-8aca-48fe-b651-45a136b101d9" />
