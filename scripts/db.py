@@ -34,4 +34,11 @@ def connect() -> psycopg.Connection:
             "DATABASE_URL is not set. Put it in .env (gitignored) or export it.\n"
             "Use the Supabase pooled connection string."
         )
-    return psycopg.connect(url)
+    # prepare_threshold=None disables server-side prepared statements.
+    # psycopg3 auto-prepares a query after the 5th execution, but Supabase's
+    # Supavisor pooler runs in TRANSACTION mode and hands each transaction a
+    # different backend, so a statement prepared on one connection is missing
+    # (or already present) on the next: "prepared statement _pg3_0 already
+    # exists". Only shows up once a query has run enough times, so it surfaces
+    # on bulk executemany rather than in early testing.
+    return psycopg.connect(url, prepare_threshold=None)

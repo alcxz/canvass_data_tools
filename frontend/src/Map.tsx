@@ -1,9 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { DASummary } from './types'
-
-type Metric = 'coverage' | 'support'
+import { colorFor, type Metric } from './scales'
 
 interface Props {
   summary: DASummary[]
@@ -12,27 +11,32 @@ interface Props {
   onSelect: (dauid: string) => void
 }
 
-/** Free raster basemap -- no Mapbox token and no billing account. */
-const BASEMAP: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: {
-    carto: {
-      type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-      ],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors © CARTO',
-    },
-  },
-  layers: [{ id: 'basemap', type: 'raster', source: 'carto' }],
+/** Free vector basemap from OpenFreeMap -- no API key, no account, no billing.
+ *  (CARTO's keyless raster tiles now render an "API KEY REQUIRED" watermark.)
+ *  Attribution is carried by the style itself and rendered by MapLibre. */
+const BASEMAP = 'https://tiles.openfreemap.org/styles/positron'
+
+/** Where the DA layers slot into the basemap's own layer stack.
+ *
+ *  The fill goes beneath the first road layer, so streets draw on top of the
+ *  choropleth at full strength and stay easy to follow. The outline goes just
+ *  beneath the first symbol (text) layer, so DA boundaries sit above the streets
+ *  but street and place names remain legible above everything. */
+function insertionPoints(map: maplibregl.Map): { roads?: string; labels?: string } {
+  const layers = map.getStyle().layers
+  const roads = layers.find((l) => /^(tunnel|highway|road|railway|aeroway)/.test(l.id))?.id
+  const labels = layers.find((l) => l.type === 'symbol')?.id
+  return { roads: roads ?? labels, labels }
 }
 
 export function DAMap({ summary, metric, selected, onSelect }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
-  const loaded = useRef(false)
+  // React state rather than a ref: the paint effects below must re-run once the
+  // layers exist, and only a state change can trigger that. With a ref, whichever
+  // of the summary fetch and the map load finished last would paint with stale
+  // data (the load handler captured the empty initial summary).
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
     if (!container.current || map.current) return
@@ -51,6 +55,7 @@ export function DAMap({ summary, metric, selected, onSelect }: Props) {
       const geojson = await fetch('/das.geojson').then((r) => r.json())
       map.current!.addSource('das', { type: 'geojson', data: geojson, promoteId: 'DAUID' })
 
+      const { roads, labels } = insertionPoints(map.current!)
       map.current!.addLayer({
         id: 'da-fill',
         type: 'fill',
@@ -59,16 +64,24 @@ export function DAMap({ summary, metric, selected, onSelect }: Props) {
           'fill-color': ['coalesce', ['feature-state', 'color'], '#e4e4e7'],
           'fill-opacity': 0.65,
         },
-      })
+      }, roads)
       map.current!.addLayer({
         id: 'da-outline',
         type: 'line',
         source: 'das',
         paint: {
-          'line-color': ['case', ['boolean', ['feature-state', 'selected'], false], '#0f172a', '#94a3b8'],
-          'line-width': ['case', ['boolean', ['feature-state', 'selected'], false], 3, 0.7],
+          'line-color': ['case', ['boolean', ['feature-state', 'selected'], false], '#0f172a', '#475569'],
+          // Line widths are in screen pixels, so a fixed width looks thinner and
+          // thinner as the streets around it grow. Scale with zoom so the DA
+          // boundary keeps its weight relative to the basemap at every level.
+          'line-width': [
+            'interpolate', ['linear'], ['zoom'],
+            11, ['case', ['boolean', ['feature-state', 'selected'], false], 2.5, 0.8],
+            14, ['case', ['boolean', ['feature-state', 'selected'], false], 3.5, 1.6],
+            17, ['case', ['boolean', ['feature-state', 'selected'], false], 5, 3],
+          ],
         },
-      })
+      }, labels)
 
       map.current!.on('click', 'da-fill', (event) => {
         const dauid = event.features?.[0]?.properties?.DAUID
@@ -81,20 +94,19 @@ export function DAMap({ summary, metric, selected, onSelect }: Props) {
         map.current!.getCanvas().style.cursor = ''
       })
 
-      loaded.current = true
-      paint()
+      setReady(true)
     })
 
     return () => {
       map.current?.remove()
       map.current = null
-      loaded.current = false
+      setReady(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  function paint() {
-    if (!map.current || !loaded.current) return
+  useEffect(() => {
+    if (!map.current || !ready) return
 
     for (const da of summary) {
       const value = metric === 'coverage' ? da.coverage_pct : da.avg_support
@@ -103,40 +115,17 @@ export function DAMap({ summary, metric, selected, onSelect }: Props) {
         { color: colorFor(metric, value) },
       )
     }
-  }
-
-  useEffect(paint, [summary, metric])
+  }, [ready, summary, metric])
 
   useEffect(() => {
-    if (!map.current || !loaded.current) return
+    if (!map.current || !ready) return
     for (const da of summary) {
       map.current.setFeatureState(
         { source: 'das', id: da.dauid },
         { selected: da.dauid === selected },
       )
     }
-  }, [selected, summary])
+  }, [ready, selected, summary])
 
   return <div ref={container} style={{ position: 'absolute', inset: 0 }} />
-}
-
-function colorFor(metric: Metric, value: number | null): string {
-  if (value === null || value === undefined) return '#f4f4f5'
-
-  if (metric === 'coverage') {
-    // Sequential. Coverage is doors knocked / census dwellings, so it can exceed
-    // 100% where a building holds more units than the census counted.
-    if (value >= 75) return '#1e3a8a'
-    if (value >= 50) return '#2563eb'
-    if (value >= 25) return '#60a5fa'
-    if (value >= 10) return '#bfdbfe'
-    return '#eff6ff'
-  }
-
-  // Diverging around 3 (Undecided).
-  if (value >= 4.5) return '#15803d'
-  if (value >= 3.75) return '#65a30d'
-  if (value >= 3.25) return '#a1a1aa'
-  if (value >= 2.5) return '#ea580c'
-  return '#b91c1c'
 }

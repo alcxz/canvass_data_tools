@@ -37,10 +37,27 @@ aside {
 
 .panel { padding: 16px 20px; }
 .panel h2 { margin: 0 0 4px; font-size: 20px; }
-.panel h3 { margin: 24px 0 8px; font-size: 15px; }
-.panel h4 { margin: 16px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
-section { border-top: 1px solid var(--border); padding-top: 4px; }
-section:first-of-type { border-top: none; }
+.panel h3 { margin: 0; font-size: 15px; }
+.panel h4 { margin: 20px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+
+/* Collapsible panel sections. The summary row is the section heading; the
+   marker is drawn as a chevron that turns when the section is open. */
+details.section { border-top: 1px solid var(--border); margin-top: 12px; }
+details.section > summary {
+  display: flex; align-items: center; gap: 8px;
+  list-style: none; cursor: pointer; padding: 12px 0 8px; margin: 0;
+  color: var(--text); user-select: none;
+}
+details.section > summary::-webkit-details-marker { display: none; }
+details.section > summary::before {
+  content: ''; width: 6px; height: 6px; flex-shrink: 0;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg); transition: transform 0.15s;
+}
+details.section[open] > summary::before { transform: rotate(45deg); }
+.section-body { padding-bottom: 16px; }
+.section-body .stats { margin-top: 4px; }
+.voters { margin-top: 20px; }
 
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 16px; margin: 0; }
 .stat dt { font-size: 12px; color: var(--muted); margin: 0; }
@@ -68,6 +85,13 @@ th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--bord
 th { color: var(--muted); font-weight: 600; }
 /* Wide content scrolls inside its own container so the panel never scrolls sideways. */
 .table-scroll { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+/* Column headings stay pinned while the voter list scrolls. Collapsed borders
+   do not travel with a sticky cell, so the rule under the header is a shadow. */
+.table-scroll th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg); border-bottom: none;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 table.mini td { padding: 3px 8px; }
 table.mini td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -76,7 +100,24 @@ table.mini td:last-child { text-align: right; font-variant-numeric: tabular-nums
 .error { color: var(--error); font-size: 13px; }
 .footnote { color: var(--muted); font-size: 11px; line-height: 1.45; margin: 8px 0 0; }
 
-details summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-top: 12px; }
+details:not(.section) summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-top: 12px; }
+
+/* Map colour key, bottom-left so it clears the navigation control at top-right
+   and MapLibre's attribution at bottom-right. */
+.legend {
+  position: absolute; left: 12px; bottom: 28px; z-index: 1;
+  background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.4;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08); max-width: 240px;
+}
+.legend-title { font-weight: 600; font-size: 13px; }
+.legend-note { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.legend ul { list-style: none; margin: 0; padding: 0; }
+.legend li { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
+.legend .swatch {
+  width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
 
 .login { display: grid; place-items: center; height: 100vh; background: var(--surface); }
 .login form {

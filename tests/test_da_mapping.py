@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from build_households import load_address_points
+from build_households import load_address_points, resolve_point
 from geodata import dauid_from_da_column, get_lookup
 from normalize import normalize_address
 
@@ -61,21 +61,14 @@ def resolved(golden_rows, address_points):
     for row in golden_rows:
         expected = dauid_from_da_column(row["DA"])
         parsed = normalize_address(row["Address"])
-        candidates = address_points.get(parsed.key, []) if parsed else []
 
-        chosen = None
-        if candidates:
-            chosen = candidates[0]
-            if len(candidates) > 1 and parsed.postal_code:
-                for candidate in candidates:
-                    if candidate[2] == parsed.postal_code:
-                        chosen = candidate
-                        break
+        # Same resolver the importer uses, so the test cannot pass against logic
+        # that build_households.py does not actually run.
+        lat, _lon, actual = resolve_point(parsed, address_points, lookup)
 
-        actual = lookup.dauid_for_point(chosen[1], chosen[0]) if chosen else None
         results.append({
             "address": row["Address"], "unit": row.get("Unit", ""),
-            "expected": expected, "actual": actual, "geocoded": chosen is not None,
+            "expected": expected, "actual": actual, "geocoded": lat is not None,
         })
 
     return results

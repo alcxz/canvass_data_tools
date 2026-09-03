@@ -1,7 +1,12 @@
 """Ward 11 canvass API.
 
-FastAPI behind API Gateway via Mangum. One function serves the whole API -- at
-161 DAs and ~20k canvass rows there is no reason to split per route.
+FastAPI behind a Lambda Function URL via Mangum. One function serves the whole
+API -- at 161 DAs and ~20k canvass rows there is no reason to split per route.
+
+Function URLs deliver the same payload format 2.0 event shape as an API Gateway
+HTTP API, so Mangum needs no change, and neither does anything below. The reason
+for choosing them is cost: API Gateway bills per request once its 12-month free
+tier lapses, while a Function URL adds nothing to the Lambda invocation.
 
 The frontend never talks to Supabase directly: the service key and database URL
 live only in this function's environment, so voter PII stays behind

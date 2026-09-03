@@ -47,7 +47,9 @@ def current_user(request: Request) -> User:
         claims = jwt.decode(
             token,
             signing_key.key,
-            algorithms=["RS256", "ES256"],
+            # Asymmetric only. Never add HS256 here: mixing symmetric and
+            # asymmetric algorithms is what enables JWT algorithm-confusion attacks.
+            algorithms=["RS256", "ES256", "EdDSA"],
             audience="authenticated",
             options={"require": ["exp", "sub"]},
         )

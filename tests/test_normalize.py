@@ -84,6 +84,39 @@ class TestEmbeddedUnits:
         assert parsed.unit == "4"
 
 
+class TestRangeVersusUnit:
+    """"<number>-<number>" is ambiguous, and guessing wrong merges distinct doors.
+
+    A range ascends; a unit does not. Getting this backwards puts two units in one
+    household, whose attempts then collide on (household_id, attempted_on) and
+    overwrite each other.
+    """
+
+    @pytest.mark.parametrize("raw,number", [
+        ("123-125 Bloor Street West", "123"),
+        ("1128-1132 Dundas Street West", "1128"),   # real row in the export
+        ("730-732 Crawford Street", "730"),
+    ])
+    def test_ascending_pair_is_an_address_range(self, raw, number):
+        parsed = normalize_address(raw)
+        assert parsed.number == number
+        assert parsed.unit == ""
+
+    @pytest.mark.parametrize("raw,unit", [
+        ("730-1 Crawford Street", "1"),             # real row in the export
+        ("730 -2 Crawford Street", "2"),            # real row, space before the dash
+        ("100-4 Main Street", "4"),
+    ])
+    def test_descending_pair_is_a_unit(self, raw, unit):
+        parsed = normalize_address(raw)
+        assert parsed.key == (raw.split("-")[0].strip().split()[0], parsed.street)
+        assert parsed.unit == unit
+
+    def test_explicit_marker_still_wins(self):
+        # "Apt 4 - 123" must stay a unit even though 4 < 123 would also say so.
+        assert normalize_address("Apt 4 - 123 Main St").unit == "4"
+
+
 class TestEdgeCases:
     def test_address_range_takes_first_number(self):
         assert normalize_address("123-125 Bloor Street West").number == "123"
@@ -106,6 +139,7 @@ class TestNormalizeUnit:
         ("Apt 4", "4"),
         ("#1102", "1102"),
         ("Lower", "LOWER"),      # row 39 of the golden fixture
+        ("-3", "3"),             # real row: "-3" and "3" must be the same door
         ("", ""),
         (None, ""),
     ])

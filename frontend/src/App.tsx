@@ -3,7 +3,9 @@ import type { Session } from '@supabase/supabase-js'
 import { fetchSummary, supabase } from './api'
 import { DAMap } from './Map'
 import { DetailPanel } from './DetailPanel'
+import { Legend } from './Legend'
 import { Login } from './Login'
+import type { Metric } from './scales'
 import type { DASummary } from './types'
 import './styles.css'
 
@@ -11,7 +13,7 @@ export function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [ready, setReady] = useState(false)
   const [summary, setSummary] = useState<DASummary[]>([])
-  const [metric, setMetric] = useState<'coverage' | 'support'>('coverage')
+  const [metric, setMetric] = useState<Metric>('coverage')
   const [selected, setSelected] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -77,6 +79,7 @@ export function App() {
             selected={selected}
             onSelect={setSelected}
           />
+          <Legend metric={metric} />
         </div>
         <aside>
           {error && <p className="error">{error}</p>}

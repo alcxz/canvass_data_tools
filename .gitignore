@@ -11,7 +11,6 @@ tests/fixtures/*
 /lda_000b21a_e.json
 
 # Deploy-time secrets
-samconfig.toml
 .env*
 
 # Large source archives (the 197MB boundary zip exceeds GitHub's 100MB limit)
@@ -19,6 +18,7 @@ samconfig.toml
 
 # Build artifacts
 .aws-sam/
+.build/
 node_modules/
 dist/
 __pycache__/

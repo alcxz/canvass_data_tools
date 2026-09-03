@@ -1,4 +1,18 @@
--- Ward 11 Canvass Data Tool — initial schema
+-- Ward 11 Canvass Data Tool — complete current schema
+--
+-- FOR A FRESH DATABASE ONLY. This file is the end state of every migration in
+-- db/migrations/ applied in order, so a new environment can be set up with one
+-- command instead of replaying the history:
+--
+--     psql "$DATABASE_URL" -f db/schema.sql
+--
+-- A database that already exists must be updated with the individual migration
+-- files instead; running this file against it would fail on the first CREATE.
+--
+-- Keep this file in sync: whenever a migration is added, fold its effect in here
+-- and bump the line below.
+--
+-- Includes migrations through: 0002_households_require_dauid.sql
 --
 -- Column scope is deliberately limited to the "Relevant Columns" list in Planning.md.
 -- The source files carry considerably more (≈45 extra census columns; Knocked By,
@@ -51,18 +65,24 @@ comment on column census_da.commute_car is
 -- in a UNIQUE constraint never conflicts in Postgres, which would let every
 -- no-unit house re-insert on each import (5,120 such rows in the current export).
 --
--- NOTE: dauid is tightened to NOT NULL in 0002. See that file.
+-- dauid is NOT NULL (0002): every query in backend/queries.py joins households
+-- to census_da through it, so a row without one would be invisible everywhere.
+-- Doors that cannot be geocoded are kept out of the database and written to
+-- data/unmatched_addresses.csv for manual correction instead.
+--
+-- geocode_status therefore only ever holds 'matched'. It is kept as a column so
+-- a future inference pass can add a value such as 'inferred' without a rewrite.
 -- ---------------------------------------------------------------------------
 create table households (
     id             bigserial primary key,
     address_raw    text not null,
     address_norm   text not null,
     unit           text not null default '',
-    dauid          text references census_da (dauid),
+    dauid          text not null references census_da (dauid),
     lat            double precision,
     lon            double precision,
-    geocode_status text not null default 'pending'
-                   check (geocode_status in ('pending', 'matched', 'unmatched')),
+    geocode_status text not null default 'matched'
+                   check (geocode_status in ('matched')),
     created_at     timestamptz not null default now(),
     unique (address_norm, unit)
 );

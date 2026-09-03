@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { fetchDetail, fetchVoters } from './api'
 import { SUPPORT_COLORS, SUPPORT_LABELS, type DADetail, type Voter } from './types'
 
 const OUTCOME_COLORS = ['#2563eb', '#0891b2', '#ca8a04', '#dc2626', '#7c3aed', '#0f766e', '#a1a1aa']
+
+/** Tall enough that the slice labels, which Recharts draws outside the pie,
+ *  are not clipped above and below it. */
+const PIE_HEIGHT = 300
+const PIE_RADIUS = 80
 
 /** Pie charts stop being readable past a handful of slices. The outcome tail is
  *  very long and very thin -- "No Answer" and "Answered" alone are ~99% of rows --
@@ -43,46 +48,17 @@ export function DetailPanel({ dauid }: { dauid: string }) {
     <div className="panel">
       <h2>DA {dauid}</h2>
 
-      <section>
-        <h3>Census</h3>
+      <Collapsible title="Canvass data">
         <dl className="stats">
-          <Stat label="Population" value={census.population.toLocaleString()} />
-          <Stat label="Dwellings" value={census.total_private_dwellings.toLocaleString()} />
-          <Stat label="Avg household" value={census.average_household_size.toFixed(1)} />
-          <Stat label="Low income" value={`${census.low_income_prevalence}%`} />
-          <Stat label="Owner / renter" value={`${census.owner} / ${census.renter}`} />
           <Stat label="Doors knocked" value={detail.doors_knocked.toLocaleString()} />
+          <Stat label="Dwellings" value={census.total_private_dwellings.toLocaleString()} />
         </dl>
 
-        <h4>Commute mode</h4>
-        <dl className="stats">
-          <Stat label="Car" value={census.commute_car} />
-          <Stat label="Transit" value={census.commute_transit} />
-          <Stat label="Walk" value={census.commute_walk} />
-          <Stat label="Bike" value={census.commute_bike} />
-        </dl>
-
-        <h4>Leaves for work</h4>
-        <dl className="stats">
-          <Stat label="5–6am" value={census.leave_0500} />
-          <Stat label="6–7am" value={census.leave_0600} />
-          <Stat label="7–8am" value={census.leave_0700} />
-          <Stat label="8–9am" value={census.leave_0800} />
-          <Stat label="9–12pm" value={census.leave_0900} />
-          <Stat label="12–5pm" value={census.leave_1200} />
-        </dl>
-        <p className="footnote">
-          Commute and departure counts come from the 25% long-form sample and do not
-          sum against population. Counts are randomly rounded to 5.
-        </p>
-      </section>
-
-      <section>
-        <h3>Support level</h3>
+        <h4>Support level</h4>
         <p className="muted small">One slice per door, using the latest recorded support.</p>
-        <ResponsiveContainer width="100%" height={220}>
+        <ResponsiveContainer width="100%" height={PIE_HEIGHT}>
           <PieChart>
-            <Pie data={supportData} dataKey="value" nameKey="name" outerRadius={80} label>
+            <Pie data={supportData} dataKey="value" nameKey="name" outerRadius={PIE_RADIUS} label>
               {supportData.map((entry) => (
                 <Cell key={entry.key} fill={SUPPORT_COLORS[entry.key]} />
               ))}
@@ -91,17 +67,15 @@ export function DetailPanel({ dauid }: { dauid: string }) {
             <Legend />
           </PieChart>
         </ResponsiveContainer>
-      </section>
 
-      <section>
-        <h3>Outcomes</h3>
+        <h4>Outcomes</h4>
         <p className="muted small">
           One slice per attempt, so these sum to 100%. A door logged as both
           “Answered” and “Not Interested” is a single combined slice.
         </p>
-        <ResponsiveContainer width="100%" height={220}>
+        <ResponsiveContainer width="100%" height={PIE_HEIGHT}>
           <PieChart>
-            <Pie data={outcomeData} dataKey="value" nameKey="name" outerRadius={80}>
+            <Pie data={outcomeData} dataKey="value" nameKey="name" outerRadius={PIE_RADIUS} label>
               {outcomeData.map((entry, index) => (
                 <Cell key={entry.name} fill={OUTCOME_COLORS[index % OUTCOME_COLORS.length]} />
               ))}
@@ -127,57 +101,100 @@ export function DetailPanel({ dauid }: { dauid: string }) {
             </tbody>
           </table>
         </details>
-      </section>
 
-      <section>
-        {voters === null ? (
-          <button
-            className="primary"
-            disabled={loadingVoters}
-            onClick={() => {
-              setLoadingVoters(true)
-              fetchVoters(dauid)
-                .then(setVoters)
-                .catch((e) => setError(String(e)))
-                .finally(() => setLoadingVoters(false))
-            }}
-          >
-            {loadingVoters ? 'Loading…' : 'Show voter list'}
-          </button>
-        ) : (
-          <>
-            <h3>Voters ({voters.length})</h3>
-            <p className="footnote">Access to this list is logged.</p>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th><th>Address</th><th>Unit</th>
-                    <th>Email</th><th>Phone</th><th>Support</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {voters.map((voter) => (
-                    <tr key={voter.id}>
-                      <td>{voter.name ?? <span className="muted">—</span>}</td>
-                      <td>{voter.address.split(',')[0]}</td>
-                      <td>{voter.unit || '—'}</td>
-                      <td>{voter.email ?? '—'}</td>
-                      <td>{voter.phone ?? '—'}</td>
-                      <td>
-                        {voter.support_level
-                          ? SUPPORT_LABELS[voter.support_level]
-                          : <span className="muted">No response</span>}
-                      </td>
+        <div className="voters">
+          {voters === null ? (
+            <button
+              className="primary"
+              disabled={loadingVoters}
+              onClick={() => {
+                setLoadingVoters(true)
+                fetchVoters(dauid)
+                  .then(setVoters)
+                  .catch((e) => setError(String(e)))
+                  .finally(() => setLoadingVoters(false))
+              }}
+            >
+              {loadingVoters ? 'Loading…' : 'Show voter list'}
+            </button>
+          ) : (
+            <>
+              <h4>Voters ({voters.length})</h4>
+              <p className="footnote">Access to this list is logged.</p>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th><th>Address</th><th>Unit</th>
+                      <th>Email</th><th>Phone</th><th>Support</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </section>
+                  </thead>
+                  <tbody>
+                    {voters.map((voter) => (
+                      <tr key={voter.id}>
+                        <td>{voter.name ?? <span className="muted">—</span>}</td>
+                        <td>{voter.address.split(',')[0]}</td>
+                        <td>{voter.unit || '—'}</td>
+                        <td>{voter.email ?? '—'}</td>
+                        <td>{voter.phone ?? '—'}</td>
+                        <td>
+                          {voter.support_level
+                            ? SUPPORT_LABELS[voter.support_level]
+                            : <span className="muted">No response</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </Collapsible>
+
+      <Collapsible title="Census data">
+        <dl className="stats">
+          <Stat label="Population" value={census.population.toLocaleString()} />
+          <Stat label="Dwellings" value={census.total_private_dwellings.toLocaleString()} />
+          <Stat label="Avg household" value={census.average_household_size.toFixed(1)} />
+          <Stat label="Low income" value={`${census.low_income_prevalence}%`} />
+          <Stat label="Owner / renter" value={`${census.owner} / ${census.renter}`} />
+        </dl>
+
+        <h4>Commute mode</h4>
+        <dl className="stats">
+          <Stat label="Car" value={census.commute_car} />
+          <Stat label="Transit" value={census.commute_transit} />
+          <Stat label="Walk" value={census.commute_walk} />
+          <Stat label="Bike" value={census.commute_bike} />
+        </dl>
+
+        <h4>Leaves for work</h4>
+        <dl className="stats">
+          <Stat label="5–6am" value={census.leave_0500} />
+          <Stat label="6–7am" value={census.leave_0600} />
+          <Stat label="7–8am" value={census.leave_0700} />
+          <Stat label="8–9am" value={census.leave_0800} />
+          <Stat label="9–12pm" value={census.leave_0900} />
+          <Stat label="12–5pm" value={census.leave_1200} />
+        </dl>
+        <p className="footnote">
+          Commute and departure counts come from the 25% long-form sample and do not
+          sum against population. Counts are randomly rounded to 5.
+        </p>
+      </Collapsible>
     </div>
+  )
+}
+
+/** A panel section that folds away. Native <details> gives keyboard support
+ *  and the open/closed state for free. Both sections start open. */
+function Collapsible({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="section" open>
+      <summary><h3>{title}</h3></summary>
+      <div className="section-body">{children}</div>
+    </details>
   )
 }
 

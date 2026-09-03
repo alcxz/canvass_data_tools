@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -33,29 +34,68 @@ from normalize import normalize_address, normalize_unit
 # spellings that have appeared rather than pinning one.
 NUMBER_FIELDS = ("ADDRESS_NUMBER", "ADDRESSNUMBER", "ADDRESS", "STREET_NUM", "NUMBER")
 STREET_FIELDS = ("LINEAR_NAME_FULL", "STREET_NAME", "LINEARNAMEFULL", "LFNAME", "STREET")
+
+# The current CKAN export has no LATITUDE/LONGITUDE columns at all: coordinates
+# arrive as a GeoJSON blob in a `geometry` column, shaped
+#   {"coordinates": [[-79.519, 43.599]], "type": "MultiPoint"}
+# Already WGS84 lon/lat, so no reprojection is needed. Older exports did ship
+# flat lat/lon columns, so both paths are supported.
 LAT_FIELDS = ("LATITUDE", "LAT", "Y")
 LON_FIELDS = ("LONGITUDE", "LONG", "LON", "X")
+GEOMETRY_FIELDS = ("GEOMETRY", "GEOM", "THE_GEOM")
 
 MIN_MATCH_RATE = 0.95
 
+# One row's geometry JSON can be long; the stdlib default field cap is 128KB.
+csv.field_size_limit(10 ** 9)
 
-def _pick_field(fieldnames: list[str], candidates: tuple[str, ...], label: str) -> str:
+
+def _pick_field(
+    fieldnames: list[str], candidates: tuple[str, ...], label: str, required: bool = True
+) -> str | None:
     upper = {name.upper().strip(): name for name in fieldnames}
     for candidate in candidates:
         if candidate in upper:
             return upper[candidate]
+    if not required:
+        return None
     raise SystemExit(
         f"Could not find the {label} column in the address-point file.\n"
         f"Looked for {candidates}.\nSaw: {fieldnames}"
     )
 
 
+def _lonlat_from_geometry(raw: str) -> tuple[float, float] | None:
+    """Pull (lon, lat) out of a GeoJSON geometry string.
+
+    Handles Point (`[lon, lat]`) and MultiPoint (`[[lon, lat]]`) -- the Toronto
+    file uses MultiPoint, so the coordinate list is nested one level deeper than
+    you would expect.
+    """
+    if not raw:
+        return None
+    try:
+        coordinates = json.loads(raw).get("coordinates")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+    while isinstance(coordinates, list) and coordinates and isinstance(coordinates[0], list):
+        coordinates = coordinates[0]
+
+    if not isinstance(coordinates, list) or len(coordinates) < 2:
+        return None
+    try:
+        return float(coordinates[0]), float(coordinates[1])
+    except (TypeError, ValueError):
+        return None
+
+
 def load_address_points(path: Path) -> dict[tuple[str, str], list[tuple[float, float, str]]]:
     """Index address points by (street number, normalized street name).
 
-    500k rows in a plain dict is unremarkable -- this is why the project has no
-    pandas dependency. Values are lists because the same street address can appear
-    more than once; the postal code disambiguates when it does.
+    525k rows in a plain dict is unremarkable -- this is why the project has no
+    pandas dependency. Values are lists because the same street name recurs across
+    Toronto's former municipalities, so one key can hold several real locations.
     """
     with path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
@@ -64,8 +104,15 @@ def load_address_points(path: Path) -> dict[tuple[str, str], list[tuple[float, f
 
         number_field = _pick_field(reader.fieldnames, NUMBER_FIELDS, "street number")
         street_field = _pick_field(reader.fieldnames, STREET_FIELDS, "street name")
-        lat_field = _pick_field(reader.fieldnames, LAT_FIELDS, "latitude")
-        lon_field = _pick_field(reader.fieldnames, LON_FIELDS, "longitude")
+        lat_field = _pick_field(reader.fieldnames, LAT_FIELDS, "latitude", required=False)
+        lon_field = _pick_field(reader.fieldnames, LON_FIELDS, "longitude", required=False)
+        geometry_field = _pick_field(reader.fieldnames, GEOMETRY_FIELDS, "geometry", required=False)
+
+        if not (lat_field and lon_field) and not geometry_field:
+            raise SystemExit(
+                "The address-point file has neither latitude/longitude columns nor a "
+                f"geometry column.\nSaw: {reader.fieldnames}"
+            )
 
         index: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
         for row in reader:
@@ -78,16 +125,51 @@ def load_address_points(path: Path) -> dict[tuple[str, str], list[tuple[float, f
             if parsed is None:
                 continue
 
-            try:
-                lat = float(row[lat_field])
-                lon = float(row[lon_field])
-            except (TypeError, ValueError, KeyError):
-                continue
+            if lat_field and lon_field:
+                try:
+                    lat = float(row[lat_field])
+                    lon = float(row[lon_field])
+                except (TypeError, ValueError, KeyError):
+                    continue
+            else:
+                lonlat = _lonlat_from_geometry(row.get(geometry_field) or "")
+                if lonlat is None:
+                    continue
+                lon, lat = lonlat
 
-            postal = (row.get("POSTAL_CODE") or row.get("POSTALCODE") or "").replace(" ", "").upper()
-            index[parsed.key].append((lat, lon, postal))
+            # Kept for the ward hint used to break ties; the current export has no
+            # postal code column, so this is usually empty.
+            hint = (row.get("WARD_NAME") or row.get("POSTAL_CODE") or "").strip().upper()
+            index[parsed.key].append((lat, lon, hint))
 
     return index
+
+
+def resolve_point(
+    parsed, points: dict, lookup
+) -> tuple[float | None, float | None, str | None]:
+    """Choose a coordinate for one address and return (lat, lon, dauid).
+
+    Where a street address matches several points -- the same street name exists in
+    more than one former municipality, and the export carries no postal code to
+    separate them -- prefer whichever candidate actually falls inside the ward.
+    Taking the first blindly would send a real Ward 11 address to a namesake
+    across the city, and it would then be discarded as "outside the ward": a
+    correct address lost to a silent mismatch.
+
+    Shared with the golden DA test so both exercise the same resolution.
+    """
+    candidates = points.get(parsed.key, []) if parsed else []
+    if not candidates:
+        return None, None, None
+
+    fallback = candidates[0]
+    for lat, lon, _hint in candidates:
+        dauid = lookup.dauid_for_point(lon, lat)
+        if dauid is not None:
+            return lat, lon, dauid
+
+    return fallback[0], fallback[1], None
 
 
 def main() -> int:
@@ -127,36 +209,33 @@ def main() -> int:
 
     for (address_norm, unit), address_raw in sorted(doors.items()):
         parsed = normalize_address(address_raw)
-        candidates = points.get(parsed.key, []) if parsed else []
+        lat, lon, dauid = resolve_point(parsed, points, lookup)
 
-        if not candidates:
+        if lat is None:
             unmatched.append((address_raw, unit, "no address-point match"))
             continue
 
-        chosen = candidates[0]
-        if len(candidates) > 1 and parsed and parsed.postal_code:
-            for candidate in candidates:
-                if candidate[2] == parsed.postal_code:
-                    chosen = candidate
-                    break
-
-        lat, lon, _ = chosen
-        dauid = lookup.dauid_for_point(lon, lat)
         if dauid is None:
+            # Geocoded, but to a point outside the ward. Not inserted: a household
+            # with no DA cannot appear in any aggregate, so it would sit in the
+            # table looking like data while being invisible everywhere.
             outside_ward += 1
             unmatched.append((address_raw, unit, "geocoded outside the ward"))
-            households.append((address_raw, address_norm, unit, None, lat, lon, "unmatched"))
             continue
 
         households.append((address_raw, address_norm, unit, dauid, lat, lon, "matched"))
 
-    matched = sum(1 for h in households if h[6] == "matched")
+    # Belt and braces: nothing without a DA reaches the insert.
+    households = [h for h in households if h[3]]
+
+    matched = len(households)
     rate = matched / len(doors) if doors else 0.0
 
     print()
     print(f"matched            : {matched:,} / {len(doors):,}  ({rate:.1%})")
     print(f"no address point   : {len(unmatched) - outside_ward:,}")
     print(f"outside the ward   : {outside_ward:,}")
+    print(f"NOT inserted       : {len(unmatched):,}  (every door without a DA)")
 
     if unmatched:
         args.unmatched_out.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +244,8 @@ def main() -> int:
             writer.writerow(["Address", "Unit", "Reason"])
             writer.writerows(unmatched)
         print(f"wrote {len(unmatched):,} unmatched rows to {args.unmatched_out}")
+        print("  These doors are not in the database, so import_canvass.py will skip")
+        print("  their canvass rows. Correct the addresses and re-run to include them.")
 
     if rate < MIN_MATCH_RATE:
         print()

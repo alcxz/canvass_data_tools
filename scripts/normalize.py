@@ -60,12 +60,20 @@ _DIRECTIONALS = {
 # Unit prefixes seen in free-text addresses.
 _UNIT_WORDS = r"(?:APT|APARTMENT|UNIT|SUITE|STE|#|NO\.?|RM|ROOM|PH)"
 
-# "Apt 4 - 123 Main St" / "#4-123 Main St" / "Unit 4, 123 Main St"
+# "Apt 4 - 123 Main St" / "#4-123 Main St"
+#
+# The unit marker is REQUIRED here. Made optional, this pattern cannot tell a unit
+# from an address range: "123-125 Bloor Street West" parses as unit 123 at number
+# 125, silently relocating the address to a house number that may sit in a
+# different DA. Bare ranges are handled by the street-number regex instead, which
+# takes the first number.
 _LEADING_UNIT_RE = re.compile(
-    rf"^\s*{_UNIT_WORDS}?\s*([A-Z0-9][A-Z0-9\-]*)\s*[-,]\s*(?=\d)", re.IGNORECASE
+    rf"^\s*{_UNIT_WORDS}\s*([A-Z0-9][A-Z0-9\-]*?)\s*[-,]?\s*(?=\d)", re.IGNORECASE
 )
 # "123 Main St #4" / "123 Main St Apt 4"
 _TRAILING_UNIT_RE = re.compile(rf"\s+{_UNIT_WORDS}\s*([A-Z0-9][A-Z0-9\-]*)\s*$", re.IGNORECASE)
+# A whole comma field that is nothing but a unit: "Unit 4, 123 Main Street".
+_UNIT_FIELD_RE = re.compile(rf"^{_UNIT_WORDS}\s*([A-Z0-9][A-Z0-9\-]*)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -132,7 +140,7 @@ def normalize_address(raw: str) -> Address | None:
         return None
 
     postal_code = None
-    street_field = None
+    candidates: list[str] = []
 
     for field in fields:
         upper = _strip_punctuation(field).upper()
@@ -150,13 +158,26 @@ def normalize_address(raw: str) -> Address | None:
 
         if not upper or upper in _NOISE_FIELDS:
             continue
-        if street_field is None:
-            street_field = upper
+        candidates.append(upper)
 
-    if street_field is None:
+    if not candidates:
         return None
 
+    # The street field is the first one beginning with a house number. Taking the
+    # first field outright breaks "Unit 4, 123 Main Street", where the unit is its
+    # own comma field and carries no number of its own.
+    street_index = next(
+        (i for i, c in enumerate(candidates) if re.match(r"^\d", c)), 0
+    )
+    street_field = candidates[street_index]
+
     unit = ""
+
+    # Anything before the street field that reads as a bare unit.
+    for earlier in candidates[:street_index]:
+        field_match = _UNIT_FIELD_RE.match(earlier)
+        if field_match:
+            unit = field_match.group(1)
 
     match = _LEADING_UNIT_RE.match(street_field)
     if match:
@@ -168,14 +189,24 @@ def normalize_address(raw: str) -> Address | None:
         unit = match.group(1)
         street_field = street_field[: match.start()].strip()
 
-    # Street number, optionally a range ("123-125") -- take the first number.
-    number_match = re.match(r"^(\d+)(?:\s*-\s*\d+)?\s*([A-Z]?)\s+(.*)$", street_field)
+    # Leading "<number>-<number>", which is ambiguous without a unit marker:
+    #   "1128-1132 Dundas Street West"  is an address RANGE
+    #   "730-1 Crawford Street"         is unit 1 at number 730
+    # A range ascends and a unit does not, so compare the two numbers. Getting this
+    # wrong merges distinct units into one household, and their attempts then
+    # collide on (household_id, attempted_on) so one silently overwrites the other.
+    number_match = re.match(r"^(\d+)(?:\s*-\s*(\d+))?\s*([A-Z]?)\s+(.*)$", street_field)
     if not number_match:
         return None
 
     number = number_match.group(1)
-    suffix = number_match.group(2)
-    remainder = number_match.group(3).strip()
+    second = number_match.group(2)
+    suffix = number_match.group(3)
+    remainder = number_match.group(4).strip()
+
+    if second is not None and not unit and int(second) < int(number):
+        unit = second
+
     if suffix:
         number = f"{number}{suffix}"
 
@@ -196,4 +227,6 @@ def normalize_unit(raw: str | None) -> str:
         return ""
     unit = _strip_punctuation(str(raw)).upper()
     unit = re.sub(rf"^{_UNIT_WORDS}\s*", "", unit, flags=re.IGNORECASE).strip()
-    return unit
+    # The export writes some units as "-3". Left alone, "-3" and "3" are two
+    # different doors at the same address.
+    return unit.strip("- ")
